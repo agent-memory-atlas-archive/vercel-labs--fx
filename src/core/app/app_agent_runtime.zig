@@ -1035,6 +1035,7 @@ pub fn Runtime(comptime App: type) type {
                     null;
 
             var deps = app_callbacks.Bindings(App).agentRuntimeDeps(app);
+            if (comptime @hasDecl(App, "providerSet")) deps.agent_stream_provider = app.providerSet().select(job.provider).agent_stream_or_unavailable();
             deps.compaction_failure = failure_provenance;
             const semantic_presentation = app_callbacks.Bindings(App).semanticPresentationSink(app);
             const config = buildQueuedPromptConfig(
@@ -1092,7 +1093,8 @@ pub fn Runtime(comptime App: type) type {
             const source_tokens = runtime_prompt_context.estimateCompactionSourceTokens(
                 messages.items,
             );
-            const deps = app_callbacks.Bindings(App).agentRuntimeDeps(app);
+            var deps = app_callbacks.Bindings(App).agentRuntimeDeps(app);
+            if (comptime @hasDecl(App, "providerSet")) deps.agent_stream_provider = app.providerSet().select(job.provider).agent_stream_or_unavailable();
             const capabilities = deps.available_model_capabilities(deps.ctx, job.model);
             const permission_mode = app_permission_runtime.Runtime(App).livePermissionSnapshot(app).mode;
             var tool_projection = try app.snapshotModelToolProjection(arena, permission_mode);
