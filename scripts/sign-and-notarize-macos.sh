@@ -50,6 +50,14 @@ fail_stage() {
     exit 1
 }
 
+if ! binary_archs="$("${xcrun_bin}" lipo -archs "${binary_path}")"; then
+    fail_stage "architecture inspection"
+fi
+signing_page_size=4096
+if [[ "${binary_archs}" == "arm64" ]]; then
+    signing_page_size=16384
+fi
+
 printf '%s' "${APPLE_DEVELOPER_ID_P12_BASE64}" \
     | "${openssl_bin}" base64 -d -A -out "${certificate_path}"
 printf '%s' "${APPLE_NOTARY_KEY_P8_BASE64}" \
@@ -95,6 +103,7 @@ if ! "${codesign_bin}" \
     --identifier "${signing_identifier}" \
     --options runtime \
     --timestamp \
+    --pagesize "${signing_page_size}" \
     "${binary_path}"; then
     fail_stage "code signing"
 fi

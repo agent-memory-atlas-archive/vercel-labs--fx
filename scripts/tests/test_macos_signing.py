@@ -124,6 +124,11 @@ if os.environ.get("FX_SIGNING_TEST_CODESIGN_FAIL_STAGE") == "sign" and "--force"
     print("injected codesign failure", file=sys.stderr)
     raise SystemExit(1)
 if "--force" in args:
+    pagesize = args[args.index("--pagesize") + 1] if "--pagesize" in args else "4096"
+    expected_pagesize = os.environ.get("FX_SIGNING_TEST_EXPECTED_PAGE_SIZE")
+    if expected_pagesize and pagesize != expected_pagesize:
+        print(f"unexpected signing page size: {{pagesize}}", file=sys.stderr)
+        raise SystemExit(1)
     binary = pathlib.Path(args[-1])
     binary.write_bytes(binary.read_bytes() + b"signed\\n")
 if "--display" in args:
@@ -163,7 +168,9 @@ with pathlib.Path(os.environ["FX_SIGNING_TEST_LOG"]).open("a") as log:
 if len(args) > 1 and args[1] == os.environ.get("FX_SIGNING_TEST_XCRUN_FAIL_COMMAND"):
     print("injected xcrun failure", file=sys.stderr)
     raise SystemExit(1)
-if args[:2] == ["notarytool", "submit"]:
+if args[:2] == ["lipo", "-archs"]:
+    print(os.environ.get("FX_SIGNING_TEST_ARCHS", "x86_64"))
+elif args[:2] == ["notarytool", "submit"]:
     status = os.environ.get("FX_SIGNING_TEST_SUBMISSION_STATUS", "Accepted")
     print(json.dumps({{"id": "test-submission", "status": status}}))
 elif args[:2] == ["notarytool", "log"]:
@@ -228,6 +235,32 @@ else:
             check=False,
         )
         return result, binary, runner_temp, event_log
+
+    def test_uses_native_signature_pages_for_thin_arm64(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="fx-macos-signing-test-") as tmp:
+            result, _, runner_temp, _ = self.run_script(
+                pathlib.Path(tmp),
+                {
+                    "FX_SIGNING_TEST_ARCHS": "arm64",
+                    "FX_SIGNING_TEST_EXPECTED_PAGE_SIZE": "16384",
+                },
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual([], list(runner_temp.iterdir()))
+
+    def test_preserves_four_kib_signature_pages_for_other_architectures(self) -> None:
+        for architectures in ("x86_64", "arm64 x86_64", "x86_64 arm64"):
+            with self.subTest(architectures=architectures):
+                with tempfile.TemporaryDirectory(prefix="fx-macos-signing-test-") as tmp:
+                    result, _, runner_temp, _ = self.run_script(
+                        pathlib.Path(tmp),
+                        {
+                            "FX_SIGNING_TEST_ARCHS": architectures,
+                            "FX_SIGNING_TEST_EXPECTED_PAGE_SIZE": "4096",
+                        },
+                    )
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertEqual([], list(runner_temp.iterdir()))
 
     def test_signs_notarizes_and_cleans_credentials_without_printing_secrets(
         self,
@@ -304,6 +337,10 @@ else:
     def test_reports_failing_signing_stage_without_printing_secrets(self) -> None:
         self.assertTrue(SCRIPT_PATH.is_file(), "macOS signing helper is missing")
         cases = (
+            (
+                {"FX_SIGNING_TEST_XCRUN_FAIL_COMMAND": "-archs"},
+                "architecture inspection",
+            ),
             (
                 {"FX_SIGNING_TEST_SECURITY_FAIL_COMMAND": "import"},
                 "PKCS#12 import",
